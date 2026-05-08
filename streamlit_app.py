@@ -1,5 +1,6 @@
 from datetime import date
 
+from openai import APIError, AuthenticationError, RateLimitError
 import streamlit as st
 
 from src.excel_template_tools import (
@@ -16,7 +17,7 @@ from src.excel_template_tools import (
 )
 
 
-APP_VERSION = "2026-05-08-openai-mapping-v1"
+APP_VERSION = "2026-05-08-openai-errors-v1"
 
 
 def get_secret(name: str) -> str:
@@ -81,6 +82,21 @@ with left:
                     )
                 st.session_state.mapping_text = mapping_as_text(generated_mapping)
                 st.success("매핑 JSON을 생성했습니다. 오른쪽 입력창을 확인하세요.")
+            except RateLimitError as exc:
+                error_code = getattr(exc, "code", None)
+                if error_code == "insufficient_quota":
+                    st.error("OpenAI 계정의 사용 가능 크레딧 또는 결제 한도가 부족합니다.")
+                    st.info(
+                        "OpenAI Platform의 Billing/Usage에서 결제수단, 남은 크레딧, 월 사용 한도를 확인하세요. "
+                        "쿼터가 복구되기 전까지는 아래 AI 프롬프트를 복사해 수동으로 매핑 JSON을 만들거나, "
+                        "오른쪽 매핑 JSON을 직접 수정해서 테스트를 계속할 수 있습니다."
+                    )
+                else:
+                    st.error("OpenAI API 요청 한도에 도달했습니다. 잠시 후 다시 시도하세요.")
+            except AuthenticationError:
+                st.error("OpenAI API Key가 유효하지 않습니다. Streamlit Secrets 또는 사이드바 입력값을 확인하세요.")
+            except APIError as exc:
+                st.error(f"OpenAI API 호출 중 오류가 발생했습니다: {exc}")
             except Exception as exc:
                 st.exception(exc)
         if not openai_api_key:

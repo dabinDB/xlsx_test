@@ -45,3 +45,11 @@ OPENAI_MODEL = "gpt-4.1-mini"
 기본 매핑 예시는 `examples/sample_mapping.json`에 있습니다.
 
 현재 앱은 `.xlsx` 템플릿을 대상으로 합니다. 매크로가 있는 `.xlsm` 파일까지 보존하려면 `openpyxl.load_workbook(..., keep_vba=True)` 흐름으로 별도 확장이 필요합니다.
+
+## OpenAI API 오류
+
+`insufficient_quota` 또는 `Error code: 429`가 나오면 앱 코드 문제가 아니라 OpenAI Platform 계정의 사용 가능 크레딧, 결제수단, 월 사용 한도 문제입니다.
+
+- OpenAI Platform의 Billing/Usage에서 결제수단과 남은 크레딧을 확인합니다.
+- Streamlit Secrets의 `OPENAI_API_KEY`가 실제 결제 계정의 키인지 확인합니다.
+- 쿼터가 복구되기 전에는 앱의 `AI 매핑 프롬프트 보기` 내용을 복사해서 수동으로 매핑 JSON을 만든 뒤, 오른쪽 `매핑 JSON` 입력창에 붙여넣어 테스트할 수 있습니다.
