@@ -15,10 +15,15 @@ from src.excel_template_tools import (
 )
 
 
+APP_VERSION = "2026-05-08-multisheet-v2"
+
 st.set_page_config(page_title="Excel Template Data Replacer", layout="wide")
 
 st.title("Excel Template Data Replacer")
-st.caption("엑셀 템플릿의 서식과 수식은 유지하고, 업로드한 데이터 값만 교체하는 테스트 앱입니다.")
+st.caption(
+    "엑셀 템플릿의 서식과 수식은 유지하고, 업로드한 데이터 값만 교체하는 테스트 앱입니다. "
+    f"App version: {APP_VERSION}"
+)
 
 template_file = st.file_uploader("1. 템플릿 엑셀 업로드", type=["xlsx"])
 data_file = st.file_uploader("2. 교체 데이터 업로드", type=["csv", "xlsx"])
@@ -35,6 +40,9 @@ with left:
     if template_file:
         template_bytes = template_file.getvalue()
         structure = extract_template_structure(template_bytes)
+        sheet_names = [sheet["name"] for sheet in structure["sheets"]]
+        st.success(f"분석된 시트 수: {len(sheet_names)}개")
+        st.write("시트 목록:", ", ".join(sheet_names))
         st.json(structure, expanded=False)
         with st.expander("AI 매핑 프롬프트 보기"):
             st.code(build_ai_prompt(structure), language="text")

@@ -104,8 +104,9 @@ def build_ai_prompt(structure: dict[str, Any]) -> str:
 
     sheet_names = ", ".join(sheet["name"] for sheet in structure["sheets"])
 
-    return f"""다음은 광고 보고서 엑셀 템플릿의 구조입니다.
+    return f"""다음은 광고 보고서 엑셀 템플릿의 전체 워크북 구조입니다.
 
+[워크북 전체 시트 수] {len(structure["sheets"])}
 [전체 시트] {sheet_names}
 
 {chr(10).join(sheet_blocks)}
