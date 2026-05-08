@@ -16,7 +16,7 @@ from src.excel_template_tools import (
 )
 
 
-APP_VERSION = "2026-05-08-gemini-import-fix-v1"
+APP_VERSION = "2026-05-08-gemini-schema-fix-v1"
 
 
 def get_secret(name: str) -> str:

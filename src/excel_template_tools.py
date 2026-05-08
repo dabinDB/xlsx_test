@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 from openpyxl import load_workbook
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
 DEFAULT_MAPPING = {
@@ -33,8 +33,6 @@ DEFAULT_MAPPING = {
 
 
 class MappingColumns(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     media: str
     impression: str
     click: str
@@ -43,8 +41,6 @@ class MappingColumns(BaseModel):
 
 
 class MappingTable(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     header_row: int
     data_start_row: int
     data_end_row: int
@@ -52,8 +48,6 @@ class MappingTable(BaseModel):
 
 
 class TemplateMapping(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     sheet_name: str
     report_date_cell: str
     data_table: MappingTable
