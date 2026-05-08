@@ -6,7 +6,6 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
-from google import genai
 import pandas as pd
 from openpyxl import load_workbook
 from pydantic import BaseModel, ConfigDict
@@ -174,6 +173,14 @@ def generate_mapping_with_gemini(
     model: str = "gemini-2.5-flash",
 ) -> dict[str, Any]:
     """Ask the Gemini API to infer a template mapping from extracted workbook structure."""
+    try:
+        from google import genai
+    except ImportError as exc:
+        raise ImportError(
+            "Gemini SDK를 불러오지 못했습니다. Streamlit Cloud가 requirements.txt의 "
+            "google-genai 패키지를 다시 설치하도록 앱을 재부팅하거나 redeploy하세요."
+        ) from exc
+
     client = genai.Client(api_key=api_key)
     prompt = build_ai_prompt(structure)
     system_instruction = (

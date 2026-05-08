@@ -33,6 +33,8 @@ GEMINI_API_KEY = "..."
 GEMINI_MODEL = "gemini-2.5-flash"
 ```
 
+Gemini SDK import 오류가 계속 나면 Streamlit Cloud의 `Manage app`에서 앱을 reboot하거나 redeploy해서 `requirements.txt`를 다시 설치하게 합니다. 이 저장소는 `runtime.txt`로 Python 3.11을 사용하도록 고정합니다.
+
 ## 사용 흐름
 
 1. 템플릿 엑셀 파일을 업로드합니다.
