@@ -6,9 +6,9 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
+from google import genai
 import pandas as pd
 from openpyxl import load_workbook
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
 
 
@@ -168,32 +168,34 @@ def build_ai_prompt(structure: dict[str, Any]) -> str:
 """
 
 
-def generate_mapping_with_openai(
+def generate_mapping_with_gemini(
     structure: dict[str, Any],
     api_key: str,
-    model: str = "gpt-4.1-mini",
+    model: str = "gemini-2.5-flash",
 ) -> dict[str, Any]:
-    """Ask the OpenAI API to infer a template mapping from extracted workbook structure."""
-    client = OpenAI(api_key=api_key)
+    """Ask the Gemini API to infer a template mapping from extracted workbook structure."""
+    client = genai.Client(api_key=api_key)
     prompt = build_ai_prompt(structure)
-
-    response = client.responses.parse(
-        model=model,
-        input=[
-            {
-                "role": "system",
-                "content": (
-                    "You infer Excel template mappings. Return only fields that identify where daily data "
-                    "should be written. Preserve formulas and total rows by excluding them from editable "
-                    "data columns. Choose the most likely sheet when a workbook has multiple sheets."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-        text_format=TemplateMapping,
+    system_instruction = (
+        "You infer Excel template mappings. Return only fields that identify where daily data "
+        "should be written. Preserve formulas and total rows by excluding them from editable "
+        "data columns. Choose the most likely sheet when a workbook has multiple sheets."
     )
 
-    return response.output_parsed.model_dump()
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config={
+            "system_instruction": system_instruction,
+            "response_mime_type": "application/json",
+            "response_schema": TemplateMapping,
+        },
+    )
+
+    parsed = response.parsed
+    if isinstance(parsed, TemplateMapping):
+        return parsed.model_dump()
+    return TemplateMapping.model_validate_json(response.text).model_dump()
 
 
 def read_data_table(uploaded_file: Any) -> pd.DataFrame:

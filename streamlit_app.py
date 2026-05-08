@@ -1,13 +1,12 @@
 from datetime import date
 
-from openai import APIError, AuthenticationError, RateLimitError
 import streamlit as st
 
 from src.excel_template_tools import (
     build_ai_prompt,
     compare_snapshots,
     extract_template_structure,
-    generate_mapping_with_openai,
+    generate_mapping_with_gemini,
     inject_data,
     mapping_as_text,
     normalize_daily_data,
@@ -17,7 +16,7 @@ from src.excel_template_tools import (
 )
 
 
-APP_VERSION = "2026-05-08-openai-errors-v1"
+APP_VERSION = "2026-05-08-gemini-mapping-v1"
 
 
 def get_secret(name: str) -> str:
@@ -41,18 +40,18 @@ report_date = st.date_input("보고일자", value=date.today())
 note = st.text_area("비고", placeholder="결과 파일의 note_cell에 들어갈 메모")
 
 with st.sidebar:
-    st.header("ChatGPT API")
-    secret_api_key = get_secret("OPENAI_API_KEY")
+    st.header("Gemini API")
+    secret_api_key = get_secret("GEMINI_API_KEY")
     api_key_input = st.text_input(
-        "OpenAI API Key",
+        "Gemini API Key",
         type="password",
         value="" if secret_api_key else "",
         placeholder="Streamlit Secrets에 없을 때만 입력",
     )
-    openai_api_key = secret_api_key or api_key_input
-    openai_model = st.text_input("Model", value=get_secret("OPENAI_MODEL") or "gpt-4.1-mini")
+    gemini_api_key = secret_api_key or api_key_input
+    gemini_model = st.text_input("Model", value=get_secret("GEMINI_MODEL") or "gemini-2.5-flash")
     if secret_api_key:
-        st.success("OPENAI_API_KEY가 Secrets에서 로드되었습니다.")
+        st.success("GEMINI_API_KEY가 Secrets에서 로드되었습니다.")
 
 st.divider()
 
@@ -72,35 +71,27 @@ with left:
         st.json(structure, expanded=False)
         with st.expander("AI 매핑 프롬프트 보기"):
             st.code(build_ai_prompt(structure), language="text")
-        if st.button("ChatGPT API로 매핑 생성", disabled=not openai_api_key, type="secondary"):
+        if st.button("Gemini API로 매핑 생성", disabled=not gemini_api_key, type="secondary"):
             try:
-                with st.spinner("ChatGPT API가 템플릿 매핑을 추론하는 중입니다..."):
-                    generated_mapping = generate_mapping_with_openai(
+                with st.spinner("Gemini API가 템플릿 매핑을 추론하는 중입니다..."):
+                    generated_mapping = generate_mapping_with_gemini(
                         structure=structure,
-                        api_key=openai_api_key,
-                        model=openai_model,
+                        api_key=gemini_api_key,
+                        model=gemini_model,
                     )
                 st.session_state.mapping_text = mapping_as_text(generated_mapping)
                 st.success("매핑 JSON을 생성했습니다. 오른쪽 입력창을 확인하세요.")
-            except RateLimitError as exc:
-                error_code = getattr(exc, "code", None)
-                if error_code == "insufficient_quota":
-                    st.error("OpenAI 계정의 사용 가능 크레딧 또는 결제 한도가 부족합니다.")
-                    st.info(
-                        "OpenAI Platform의 Billing/Usage에서 결제수단, 남은 크레딧, 월 사용 한도를 확인하세요. "
-                        "쿼터가 복구되기 전까지는 아래 AI 프롬프트를 복사해 수동으로 매핑 JSON을 만들거나, "
-                        "오른쪽 매핑 JSON을 직접 수정해서 테스트를 계속할 수 있습니다."
-                    )
-                else:
-                    st.error("OpenAI API 요청 한도에 도달했습니다. 잠시 후 다시 시도하세요.")
-            except AuthenticationError:
-                st.error("OpenAI API Key가 유효하지 않습니다. Streamlit Secrets 또는 사이드바 입력값을 확인하세요.")
-            except APIError as exc:
-                st.error(f"OpenAI API 호출 중 오류가 발생했습니다: {exc}")
             except Exception as exc:
-                st.exception(exc)
-        if not openai_api_key:
-            st.info("ChatGPT API 매핑 생성을 쓰려면 사이드바에 API 키를 입력하거나 Streamlit Secrets를 설정하세요.")
+                message = str(exc)
+                if "API key" in message or "permission" in message.lower() or "unauthenticated" in message.lower():
+                    st.error("Gemini API Key가 유효하지 않거나 권한이 없습니다. Streamlit Secrets 또는 사이드바 입력값을 확인하세요.")
+                elif "quota" in message.lower() or "rate" in message.lower():
+                    st.error("Gemini API 사용량 한도 또는 쿼터에 도달했습니다.")
+                    st.info("Google AI Studio/Google Cloud의 API 키, 결제, 무료 한도, 분당 요청 제한을 확인하세요.")
+                else:
+                    st.error(f"Gemini API 호출 중 오류가 발생했습니다: {message}")
+        if not gemini_api_key:
+            st.info("Gemini API 매핑 생성을 쓰려면 사이드바에 API 키를 입력하거나 Streamlit Secrets를 설정하세요.")
     else:
         template_bytes = None
         st.info("템플릿 파일을 업로드하면 구조 분석 결과와 AI 프롬프트가 표시됩니다.")
