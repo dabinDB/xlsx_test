@@ -6,6 +6,7 @@
 
 - 템플릿 엑셀 파일 업로드 (`.xlsx`)
 - 템플릿 구조 추출 및 AI 매핑 프롬프트 생성
+- ChatGPT API로 매핑 JSON 자동 생성
 - 여러 시트가 있는 템플릿의 전체 시트 구조를 프롬프트에 포함
 - CSV/XLSX 일일 데이터 업로드
 - 매핑 JSON 기반으로 값만 교체
@@ -24,15 +25,22 @@ streamlit run streamlit_app.py
 1. 이 폴더를 GitHub 저장소로 push합니다.
 2. [Streamlit Community Cloud](https://streamlit.io/cloud)에서 새 앱을 만듭니다.
 3. 저장소와 브랜치를 선택하고 main file path를 `streamlit_app.py`로 지정합니다.
-4. Deploy를 누릅니다.
+4. 앱 Settings의 Secrets에 아래 값을 추가합니다.
+5. Deploy를 누릅니다.
+
+```toml
+OPENAI_API_KEY = "sk-proj-..."
+OPENAI_MODEL = "gpt-4.1-mini"
+```
 
 ## 사용 흐름
 
 1. 템플릿 엑셀 파일을 업로드합니다.
-2. 앱이 보여주는 AI 프롬프트를 Claude, ChatGPT 등에게 보내 매핑 JSON을 얻습니다.
-3. 매핑 JSON 입력창에 붙여넣습니다. 여러 시트 템플릿이면 `sheet_name`에 값을 교체할 시트명을 넣습니다.
-4. `examples/sample_daily_data.csv` 형식처럼 교체 데이터를 업로드합니다.
-5. 보고일자와 비고를 입력한 뒤 실행합니다.
+2. 사이드바에서 OpenAI API 키가 설정되어 있는지 확인합니다.
+3. `ChatGPT API로 매핑 생성` 버튼을 눌러 매핑 JSON을 자동 생성합니다.
+4. 필요하면 매핑 JSON을 직접 수정합니다. 여러 시트 템플릿이면 `sheet_name`에 값을 교체할 시트명을 넣습니다.
+5. `examples/sample_daily_data.csv` 형식처럼 교체 데이터를 업로드합니다.
+6. 보고일자와 비고를 입력한 뒤 실행합니다.
 
 기본 매핑 예시는 `examples/sample_mapping.json`에 있습니다.
 

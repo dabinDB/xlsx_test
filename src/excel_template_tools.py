@@ -8,6 +8,8 @@ from typing import Any
 
 import pandas as pd
 from openpyxl import load_workbook
+from openai import OpenAI
+from pydantic import BaseModel, ConfigDict
 
 
 DEFAULT_MAPPING = {
@@ -29,6 +31,36 @@ DEFAULT_MAPPING = {
     "total_row": 9,
     "note_cell": "A12",
 }
+
+
+class MappingColumns(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    media: str
+    impression: str
+    click: str
+    cost: str
+    conversion: str
+
+
+class MappingTable(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    header_row: int
+    data_start_row: int
+    data_end_row: int
+    columns: MappingColumns
+
+
+class TemplateMapping(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sheet_name: str
+    report_date_cell: str
+    data_table: MappingTable
+    formula_columns: list[str]
+    total_row: int
+    note_cell: str
 
 
 def extract_template_structure(workbook_bytes: bytes, max_rows: int = 30, max_cols: int = 15) -> dict[str, Any]:
@@ -134,6 +166,34 @@ def build_ai_prompt(structure: dict[str, Any]) -> str:
   "note_cell": "비고/메모 입력 셀 주소"
 }}
 """
+
+
+def generate_mapping_with_openai(
+    structure: dict[str, Any],
+    api_key: str,
+    model: str = "gpt-4.1-mini",
+) -> dict[str, Any]:
+    """Ask the OpenAI API to infer a template mapping from extracted workbook structure."""
+    client = OpenAI(api_key=api_key)
+    prompt = build_ai_prompt(structure)
+
+    response = client.responses.parse(
+        model=model,
+        input=[
+            {
+                "role": "system",
+                "content": (
+                    "You infer Excel template mappings. Return only fields that identify where daily data "
+                    "should be written. Preserve formulas and total rows by excluding them from editable "
+                    "data columns. Choose the most likely sheet when a workbook has multiple sheets."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        text_format=TemplateMapping,
+    )
+
+    return response.output_parsed.model_dump()
 
 
 def read_data_table(uploaded_file: Any) -> pd.DataFrame:

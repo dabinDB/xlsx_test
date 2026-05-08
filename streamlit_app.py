@@ -6,6 +6,7 @@ from src.excel_template_tools import (
     build_ai_prompt,
     compare_snapshots,
     extract_template_structure,
+    generate_mapping_with_openai,
     inject_data,
     mapping_as_text,
     normalize_daily_data,
@@ -15,7 +16,14 @@ from src.excel_template_tools import (
 )
 
 
-APP_VERSION = "2026-05-08-multisheet-v2"
+APP_VERSION = "2026-05-08-openai-mapping-v1"
+
+
+def get_secret(name: str) -> str:
+    try:
+        return st.secrets.get(name, "")
+    except Exception:
+        return ""
 
 st.set_page_config(page_title="Excel Template Data Replacer", layout="wide")
 
@@ -31,7 +39,24 @@ data_file = st.file_uploader("2. 교체 데이터 업로드", type=["csv", "xlsx
 report_date = st.date_input("보고일자", value=date.today())
 note = st.text_area("비고", placeholder="결과 파일의 note_cell에 들어갈 메모")
 
+with st.sidebar:
+    st.header("ChatGPT API")
+    secret_api_key = get_secret("OPENAI_API_KEY")
+    api_key_input = st.text_input(
+        "OpenAI API Key",
+        type="password",
+        value="" if secret_api_key else "",
+        placeholder="Streamlit Secrets에 없을 때만 입력",
+    )
+    openai_api_key = secret_api_key or api_key_input
+    openai_model = st.text_input("Model", value=get_secret("OPENAI_MODEL") or "gpt-4.1-mini")
+    if secret_api_key:
+        st.success("OPENAI_API_KEY가 Secrets에서 로드되었습니다.")
+
 st.divider()
+
+if "mapping_text" not in st.session_state:
+    st.session_state.mapping_text = mapping_as_text()
 
 left, right = st.columns([1, 1])
 
@@ -46,6 +71,20 @@ with left:
         st.json(structure, expanded=False)
         with st.expander("AI 매핑 프롬프트 보기"):
             st.code(build_ai_prompt(structure), language="text")
+        if st.button("ChatGPT API로 매핑 생성", disabled=not openai_api_key, type="secondary"):
+            try:
+                with st.spinner("ChatGPT API가 템플릿 매핑을 추론하는 중입니다..."):
+                    generated_mapping = generate_mapping_with_openai(
+                        structure=structure,
+                        api_key=openai_api_key,
+                        model=openai_model,
+                    )
+                st.session_state.mapping_text = mapping_as_text(generated_mapping)
+                st.success("매핑 JSON을 생성했습니다. 오른쪽 입력창을 확인하세요.")
+            except Exception as exc:
+                st.exception(exc)
+        if not openai_api_key:
+            st.info("ChatGPT API 매핑 생성을 쓰려면 사이드바에 API 키를 입력하거나 Streamlit Secrets를 설정하세요.")
     else:
         template_bytes = None
         st.info("템플릿 파일을 업로드하면 구조 분석 결과와 AI 프롬프트가 표시됩니다.")
@@ -54,7 +93,7 @@ with right:
     st.subheader("매핑 JSON")
     mapping_text = st.text_area(
         "AI가 반환한 매핑 JSON 또는 수동 매핑을 입력하세요.",
-        value=mapping_as_text(),
+        key="mapping_text",
         height=420,
     )
 
