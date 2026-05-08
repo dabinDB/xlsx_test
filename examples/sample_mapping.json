@@ -1,0 +1,18 @@
+{
+  "report_date_cell": "C2",
+  "data_table": {
+    "header_row": 4,
+    "data_start_row": 5,
+    "data_end_row": 8,
+    "columns": {
+      "media": "A",
+      "impression": "B",
+      "click": "C",
+      "cost": "D",
+      "conversion": "E"
+    }
+  },
+  "formula_columns": ["F", "G"],
+  "total_row": 9,
+  "note_cell": "A12"
+}
