@@ -78,8 +78,10 @@ if run and template_bytes and data_df is not None:
             st.warning("일부 차이가 발견되었습니다. 아래 내용을 확인하세요.")
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("병합 영역", len(after["merged_ranges"]))
-        c2.metric("차트 수", after["chart_count"])
+        total_merged_ranges = sum(len(sheet["merged_ranges"]) for sheet in after["sheets"].values())
+        total_charts = sum(sheet["chart_count"] for sheet in after["sheets"].values())
+        c1.metric("전체 병합 영역", total_merged_ranges)
+        c2.metric("전체 차트 수", total_charts)
         c3.metric("서식 차이", diff["style_diffs_count"])
 
         if diff["structural_diffs"]:

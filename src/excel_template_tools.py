@@ -11,6 +11,7 @@ from openpyxl import load_workbook
 
 
 DEFAULT_MAPPING = {
+    "sheet_name": "Sheet1",
     "report_date_cell": "C2",
     "data_table": {
         "header_row": 4,
@@ -72,37 +73,48 @@ def extract_template_structure(workbook_bytes: bytes, max_rows: int = 30, max_co
 
 def build_ai_prompt(structure: dict[str, Any]) -> str:
     """Build a prompt that asks an LLM to infer replaceable data locations."""
-    sheet = structure["sheets"][0]
-    grid_lines = []
+    sheet_blocks = []
 
-    for cell in sheet["cells"]:
-        flags = []
-        if cell.get("bold"):
-            flags.append("bold")
-        if cell.get("fill"):
-            flags.append(f"fill={cell['fill'][-6:]}")
-        if cell.get("fmt"):
-            flags.append(f"fmt={cell['fmt']}")
-        flag_str = f" [{', '.join(flags)}]" if flags else ""
-        grid_lines.append(f"  {cell['addr']}: \"{cell['value']}\"{flag_str}")
+    for index, sheet in enumerate(structure["sheets"], start=1):
+        grid_lines = []
+        for cell in sheet["cells"]:
+            flags = []
+            if cell.get("bold"):
+                flags.append("bold")
+            if cell.get("fill"):
+                flags.append(f"fill={cell['fill'][-6:]}")
+            if cell.get("fmt"):
+                flags.append(f"fmt={cell['fmt']}")
+            flag_str = f" [{', '.join(flags)}]" if flags else ""
+            grid_lines.append(f"  {cell['addr']}: \"{cell['value']}\"{flag_str}")
 
-    merged = "\n".join(f"  - {m}" for m in sheet["merged_ranges"]) or "  (없음)"
+        merged = "\n".join(f"  - {m}" for m in sheet["merged_ranges"]) or "  (없음)"
+        cells = "\n".join(grid_lines) or "  (값이 있는 셀 없음)"
+        sheet_blocks.append(
+            f"""[시트 {index}]
+시트명: {sheet['name']}
+데이터 영역: {sheet['dimensions']}
+
+병합된 셀:
+{merged}
+
+셀 값 및 서식:
+{cells}"""
+        )
+
+    sheet_names = ", ".join(sheet["name"] for sheet in structure["sheets"])
 
     return f"""다음은 광고 보고서 엑셀 템플릿의 구조입니다.
 
-[시트명] {sheet['name']}
-[데이터 영역] {sheet['dimensions']}
+[전체 시트] {sheet_names}
 
-[병합된 셀]
-{merged}
-
-[셀 값 및 서식]
-{chr(10).join(grid_lines)}
+{chr(10).join(sheet_blocks)}
 
 위 템플릿에서 매일 교체되어야 할 동적 데이터의 셀 위치를 추론하여
 아래 JSON 스키마로 답해주세요. 설명 없이 JSON만 출력하세요.
 
 {{
+  "sheet_name": "데이터를 교체할 시트명",
   "report_date_cell": "보고일자가 들어갈 셀 주소",
   "data_table": {{
     "header_row": 헤더 행 번호,
@@ -138,59 +150,76 @@ def normalize_daily_data(df: pd.DataFrame, report_date: str, note: str) -> dict[
 
 def snapshot_design(workbook_bytes: bytes, max_rows: int = 40, max_cols: int = 15) -> dict[str, Any]:
     wb = load_workbook(BytesIO(workbook_bytes), data_only=False)
-    ws = wb.active
     snap: dict[str, Any] = {
-        "merged_ranges": sorted(str(r) for r in ws.merged_cells.ranges),
-        "column_widths": {k: v.width for k, v in ws.column_dimensions.items() if v.width},
-        "row_heights": {k: v.height for k, v in ws.row_dimensions.items() if v.height},
-        "chart_count": len(ws._charts),
-        "cells": {},
+        "sheet_names": wb.sheetnames,
+        "sheets": {},
     }
 
-    for row in ws.iter_rows(min_row=1, max_row=max_rows, min_col=1, max_col=max_cols):
-        for cell in row:
-            info: dict[str, Any] = {}
-            if cell.font:
-                info["font_bold"] = cell.font.bold
-                info["font_color"] = str(cell.font.color.rgb) if cell.font.color and cell.font.color.type == "rgb" else None
-                info["font_name"] = cell.font.name
-                info["font_size"] = cell.font.size
-            if cell.fill and cell.fill.start_color:
-                info["fill"] = str(cell.fill.start_color.rgb)
-            if cell.border:
-                info["has_border"] = bool(cell.border.left and cell.border.left.style)
-            if cell.number_format:
-                info["fmt"] = cell.number_format
-            if cell.alignment:
-                info["align"] = (cell.alignment.horizontal, cell.alignment.vertical)
-            snap["cells"][cell.coordinate] = info
+    for ws in wb.worksheets:
+        sheet_snap: dict[str, Any] = {
+            "merged_ranges": sorted(str(r) for r in ws.merged_cells.ranges),
+            "column_widths": {k: v.width for k, v in ws.column_dimensions.items() if v.width},
+            "row_heights": {k: v.height for k, v in ws.row_dimensions.items() if v.height},
+            "chart_count": len(ws._charts),
+            "cells": {},
+        }
+        for row in ws.iter_rows(min_row=1, max_row=max_rows, min_col=1, max_col=max_cols):
+            for cell in row:
+                info: dict[str, Any] = {}
+                if cell.font:
+                    info["font_bold"] = cell.font.bold
+                    info["font_color"] = (
+                        str(cell.font.color.rgb) if cell.font.color and cell.font.color.type == "rgb" else None
+                    )
+                    info["font_name"] = cell.font.name
+                    info["font_size"] = cell.font.size
+                if cell.fill and cell.fill.start_color:
+                    info["fill"] = str(cell.fill.start_color.rgb)
+                if cell.border:
+                    info["has_border"] = bool(cell.border.left and cell.border.left.style)
+                if cell.number_format:
+                    info["fmt"] = cell.number_format
+                if cell.alignment:
+                    info["align"] = (cell.alignment.horizontal, cell.alignment.vertical)
+                sheet_snap["cells"][cell.coordinate] = info
+        snap["sheets"][ws.title] = sheet_snap
     return snap
 
 
 def compare_snapshots(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     structural_diffs = []
-    if before["merged_ranges"] != after["merged_ranges"]:
-        structural_diffs.append("병합 영역이 변경되었습니다.")
-    if before["column_widths"] != after["column_widths"]:
-        structural_diffs.append("컬럼 너비가 변경되었습니다.")
-    if before["row_heights"] != after["row_heights"]:
-        structural_diffs.append("행 높이가 변경되었습니다.")
-    if before["chart_count"] != after["chart_count"]:
-        structural_diffs.append("차트 개수가 변경되었습니다.")
+    if before["sheet_names"] != after["sheet_names"]:
+        structural_diffs.append("시트 목록 또는 순서가 변경되었습니다.")
 
     style_changed = []
-    for addr, before_info in before["cells"].items():
-        after_info = after["cells"].get(addr, {})
-        for key in ["font_bold", "font_color", "fill", "fmt", "align", "has_border"]:
-            if before_info.get(key) != after_info.get(key):
-                style_changed.append(
-                    {
-                        "cell": addr,
-                        "property": key,
-                        "before": before_info.get(key),
-                        "after": after_info.get(key),
-                    }
-                )
+    for sheet_name, before_sheet in before["sheets"].items():
+        after_sheet = after["sheets"].get(sheet_name)
+        if not after_sheet:
+            structural_diffs.append(f"{sheet_name} 시트가 사라졌습니다.")
+            continue
+
+        if before_sheet["merged_ranges"] != after_sheet["merged_ranges"]:
+            structural_diffs.append(f"{sheet_name} 시트의 병합 영역이 변경되었습니다.")
+        if before_sheet["column_widths"] != after_sheet["column_widths"]:
+            structural_diffs.append(f"{sheet_name} 시트의 컬럼 너비가 변경되었습니다.")
+        if before_sheet["row_heights"] != after_sheet["row_heights"]:
+            structural_diffs.append(f"{sheet_name} 시트의 행 높이가 변경되었습니다.")
+        if before_sheet["chart_count"] != after_sheet["chart_count"]:
+            structural_diffs.append(f"{sheet_name} 시트의 차트 개수가 변경되었습니다.")
+
+        for addr, before_info in before_sheet["cells"].items():
+            after_info = after_sheet["cells"].get(addr, {})
+            for key in ["font_bold", "font_color", "fill", "fmt", "align", "has_border"]:
+                if before_info.get(key) != after_info.get(key):
+                    style_changed.append(
+                        {
+                            "sheet": sheet_name,
+                            "cell": addr,
+                            "property": key,
+                            "before": before_info.get(key),
+                            "after": after_info.get(key),
+                        }
+                    )
 
     return {
         "structural_diffs": structural_diffs,
@@ -209,7 +238,8 @@ def inject_data(template_bytes: bytes, mapping: dict[str, Any], data: dict[str, 
     try:
         shutil.copy(template_path, output_path)
         wb = load_workbook(output_path, data_only=False)
-        ws = wb.active
+        sheet_name = mapping.get("sheet_name")
+        ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.active
 
         if mapping.get("report_date_cell"):
             ws[mapping["report_date_cell"]] = data.get("report_date")
