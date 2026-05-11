@@ -13,6 +13,13 @@
       "conversion": "E"
     }
   },
+  "source_columns": {
+    "media": "media",
+    "impression": "impression",
+    "click": "click",
+    "cost": "cost",
+    "conversion": "conversion"
+  },
   "formula_columns": ["F", "G"],
   "total_row": 9,
   "note_cell": "A12"

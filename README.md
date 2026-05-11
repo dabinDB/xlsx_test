@@ -6,7 +6,7 @@
 
 - 템플릿 엑셀 파일 업로드 (`.xlsx`)
 - 템플릿 구조 추출 및 AI 매핑 프롬프트 생성
-- Gemini API로 매핑 JSON 자동 생성
+- Gemini API로 템플릿 셀 위치와 업로드 데이터 컬럼을 함께 자동 매핑
 - 여러 시트가 있는 템플릿의 전체 시트 구조를 프롬프트에 포함
 - CSV/XLSX 일일 데이터 업로드
 - 매핑 JSON 기반으로 값만 교체
@@ -39,10 +39,12 @@ Gemini SDK import 오류가 계속 나면 Streamlit Cloud의 `Manage app`에서 
 
 1. 템플릿 엑셀 파일을 업로드합니다.
 2. 사이드바에서 Gemini API 키가 설정되어 있는지 확인합니다.
-3. `Gemini API로 매핑 생성` 버튼을 눌러 매핑 JSON을 자동 생성합니다.
-4. 필요하면 매핑 JSON을 직접 수정합니다. 여러 시트 템플릿이면 `sheet_name`에 값을 교체할 시트명을 넣습니다.
-5. `examples/sample_daily_data.csv` 형식처럼 교체 데이터를 업로드합니다.
+3. `examples/sample_daily_data.csv` 형식처럼 교체 데이터를 업로드합니다.
+4. `Gemini API로 템플릿+데이터 매핑 생성` 버튼을 눌러 매핑 JSON을 자동 생성합니다.
+5. 필요하면 매핑 JSON을 직접 수정합니다. 여러 시트 템플릿이면 `sheet_name`에 값을 교체할 시트명을 넣습니다.
 6. 보고일자와 비고를 입력한 뒤 실행합니다.
+
+매핑 JSON의 `data_table.columns`는 템플릿 엑셀에서 값을 넣을 컬럼 위치이고, `source_columns`는 업로드 데이터에서 값을 읽을 컬럼명입니다.
 
 기본 매핑 예시는 `examples/sample_mapping.json`에 있습니다.
 

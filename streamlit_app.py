@@ -3,8 +3,10 @@ from datetime import date
 import streamlit as st
 
 from src.excel_template_tools import (
+    build_data_preview,
     build_ai_prompt,
     compare_snapshots,
+    count_injectable_values,
     extract_template_structure,
     generate_mapping_with_gemini,
     inject_data,
@@ -16,7 +18,7 @@ from src.excel_template_tools import (
 )
 
 
-APP_VERSION = "2026-05-08-gemini-schema-fix-v1"
+APP_VERSION = "2026-05-11-data-aware-mapping-v1"
 
 
 def get_secret(name: str) -> str:
@@ -58,6 +60,11 @@ st.divider()
 if "mapping_text" not in st.session_state:
     st.session_state.mapping_text = mapping_as_text()
 
+if data_file:
+    data_df = read_data_table(data_file)
+else:
+    data_df = None
+
 left, right = st.columns([1, 1])
 
 with left:
@@ -69,15 +76,19 @@ with left:
         st.success(f"분석된 시트 수: {len(sheet_names)}개")
         st.write("시트 목록:", ", ".join(sheet_names))
         st.json(structure, expanded=False)
+        data_preview = build_data_preview(data_df) if data_df is not None else None
         with st.expander("AI 매핑 프롬프트 보기"):
-            st.code(build_ai_prompt(structure), language="text")
-        if st.button("Gemini API로 매핑 생성", disabled=not gemini_api_key, type="secondary"):
+            st.code(build_ai_prompt(structure, data_preview=data_preview), language="text")
+        if data_preview:
+            st.write("업로드 데이터 컬럼:", ", ".join(data_preview["columns"]))
+        if st.button("Gemini API로 템플릿+데이터 매핑 생성", disabled=not (gemini_api_key and data_preview), type="secondary"):
             try:
                 with st.spinner("Gemini API가 템플릿 매핑을 추론하는 중입니다..."):
                     generated_mapping = generate_mapping_with_gemini(
                         structure=structure,
                         api_key=gemini_api_key,
                         model=gemini_model,
+                        data_preview=data_preview,
                     )
                 st.session_state.mapping_text = mapping_as_text(generated_mapping)
                 st.success("매핑 JSON을 생성했습니다. 오른쪽 입력창을 확인하세요.")
@@ -92,6 +103,8 @@ with left:
                     st.error(f"Gemini API 호출 중 오류가 발생했습니다: {message}")
         if not gemini_api_key:
             st.info("Gemini API 매핑 생성을 쓰려면 사이드바에 API 키를 입력하거나 Streamlit Secrets를 설정하세요.")
+        if data_preview is None:
+            st.info("업로드 데이터 컬럼까지 AI로 매핑하려면 교체 데이터 파일도 업로드하세요.")
     else:
         template_bytes = None
         st.info("템플릿 파일을 업로드하면 구조 분석 결과와 AI 프롬프트가 표시됩니다.")
@@ -106,12 +119,9 @@ with right:
 
 st.divider()
 
-if data_file:
-    data_df = read_data_table(data_file)
+if data_df is not None:
     st.subheader("업로드 데이터 미리보기")
     st.dataframe(data_df, use_container_width=True)
-else:
-    data_df = None
 
 run = st.button("값 교체 및 검증 실행", type="primary", disabled=not (template_file and data_file))
 
@@ -119,6 +129,20 @@ if run and template_bytes and data_df is not None:
     try:
         mapping = validate_mapping(mapping_text)
         daily_data = normalize_daily_data(data_df, str(report_date), note)
+        coverage = count_injectable_values(mapping, daily_data)
+
+        st.subheader("데이터 매핑 확인")
+        st.json(
+            {
+                "source_columns": mapping.get("source_columns", {}),
+                "injectable_values": coverage["injectable_values"],
+                "missing_sources": coverage["missing_sources"],
+            },
+            expanded=False,
+        )
+        if coverage["injectable_values"] == 0:
+            st.error("업로드 데이터에서 주입할 값을 찾지 못했습니다. 매핑 JSON의 source_columns를 확인하세요.")
+            st.stop()
 
         before = snapshot_design(template_bytes)
         output_bytes = inject_data(template_bytes, mapping, daily_data)

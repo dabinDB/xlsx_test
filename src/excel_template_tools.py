@@ -1,6 +1,7 @@
 import copy
 import json
 import shutil
+from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -25,6 +26,13 @@ DEFAULT_MAPPING = {
             "cost": "D",
             "conversion": "E",
         },
+    },
+    "source_columns": {
+        "media": "media",
+        "impression": "impression",
+        "click": "click",
+        "cost": "cost",
+        "conversion": "conversion",
     },
     "formula_columns": ["F", "G"],
     "total_row": 9,
@@ -51,6 +59,7 @@ class TemplateMapping(BaseModel):
     sheet_name: str
     report_date_cell: str
     data_table: MappingTable
+    source_columns: MappingColumns
     formula_columns: list[str]
     total_row: int
     note_cell: str
@@ -96,7 +105,7 @@ def extract_template_structure(workbook_bytes: bytes, max_rows: int = 30, max_co
     return result
 
 
-def build_ai_prompt(structure: dict[str, Any]) -> str:
+def build_ai_prompt(structure: dict[str, Any], data_preview: dict[str, Any] | None = None) -> str:
     """Build a prompt that asks an LLM to infer replaceable data locations."""
     sheet_blocks = []
 
@@ -128,6 +137,16 @@ def build_ai_prompt(structure: dict[str, Any]) -> str:
         )
 
     sheet_names = ", ".join(sheet["name"] for sheet in structure["sheets"])
+    data_block = ""
+    if data_preview:
+        data_block = f"""
+
+[업로드 데이터 컬럼]
+{json.dumps(data_preview["columns"], ensure_ascii=False, indent=2)}
+
+[업로드 데이터 샘플]
+{json.dumps(data_preview["rows"], ensure_ascii=False, indent=2)}
+"""
 
     return f"""다음은 광고 보고서 엑셀 템플릿의 전체 워크북 구조입니다.
 
@@ -135,8 +154,10 @@ def build_ai_prompt(structure: dict[str, Any]) -> str:
 [전체 시트] {sheet_names}
 
 {chr(10).join(sheet_blocks)}
+{data_block}
 
 위 템플릿에서 매일 교체되어야 할 동적 데이터의 셀 위치를 추론하여
+업로드 데이터 컬럼과 템플릿 입력 필드도 함께 매핑해주세요.
 아래 JSON 스키마로 답해주세요. 설명 없이 JSON만 출력하세요.
 
 {{
@@ -154,6 +175,13 @@ def build_ai_prompt(structure: dict[str, Any]) -> str:
       "conversion": "전환수 컬럼 letter"
     }}
   }},
+  "source_columns": {{
+    "media": "업로드 데이터에서 매체명에 해당하는 컬럼명",
+    "impression": "업로드 데이터에서 노출수에 해당하는 컬럼명",
+    "click": "업로드 데이터에서 클릭수에 해당하는 컬럼명",
+    "cost": "업로드 데이터에서 비용에 해당하는 컬럼명",
+    "conversion": "업로드 데이터에서 전환수에 해당하는 컬럼명"
+  }},
   "formula_columns": ["수식이 들어있어 건드리면 안 되는 컬럼 letter들"],
   "total_row": 합계 행 번호,
   "note_cell": "비고/메모 입력 셀 주소"
@@ -165,6 +193,7 @@ def generate_mapping_with_gemini(
     structure: dict[str, Any],
     api_key: str,
     model: str = "gemini-2.5-flash",
+    data_preview: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Ask the Gemini API to infer a template mapping from extracted workbook structure."""
     try:
@@ -176,11 +205,13 @@ def generate_mapping_with_gemini(
         ) from exc
 
     client = genai.Client(api_key=api_key)
-    prompt = build_ai_prompt(structure)
+    prompt = build_ai_prompt(structure, data_preview=data_preview)
     system_instruction = (
         "You infer Excel template mappings. Return only fields that identify where daily data "
         "should be written. Preserve formulas and total rows by excluding them from editable "
-        "data columns. Choose the most likely sheet when a workbook has multiple sheets."
+        "data columns. Choose the most likely sheet when a workbook has multiple sheets. "
+        "Map uploaded source data columns to the canonical fields: media, impression, click, "
+        "cost, and conversion."
     )
 
     response = client.models.generate_content(
@@ -210,6 +241,63 @@ def read_data_table(uploaded_file: Any) -> pd.DataFrame:
 def normalize_daily_data(df: pd.DataFrame, report_date: str, note: str) -> dict[str, Any]:
     rows = df.where(pd.notnull(df), None).to_dict(orient="records")
     return {"report_date": report_date, "rows": rows, "note": note}
+
+
+def build_data_preview(df: pd.DataFrame, max_rows: int = 5) -> dict[str, Any]:
+    preview_df = df.head(max_rows).where(pd.notnull(df.head(max_rows)), None)
+    return {
+        "columns": [str(col) for col in df.columns],
+        "rows": [
+            {str(key): make_json_safe(value) for key, value in row.items()}
+            for row in preview_df.to_dict(orient="records")
+        ],
+    }
+
+
+def make_json_safe(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except ValueError:
+            pass
+    return value
+
+
+def lookup_row_value(row_data: dict[str, Any], source_column: str) -> Any:
+    if source_column in row_data:
+        return row_data[source_column]
+
+    normalized_source = "".join(str(source_column).lower().split())
+    for key, value in row_data.items():
+        if "".join(str(key).lower().split()) == normalized_source:
+            return value
+    return None
+
+
+def count_injectable_values(mapping: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    cols = mapping["data_table"]["columns"]
+    source_cols = mapping.get("source_columns", {})
+    rows = data["rows"]
+    count = 0
+    missing_sources = set()
+
+    for row_data in rows:
+        for field in cols:
+            source_column = source_cols.get(field, field)
+            value = lookup_row_value(row_data, source_column)
+            if value is None:
+                missing_sources.add(source_column)
+            else:
+                count += 1
+
+    return {
+        "injectable_values": count,
+        "missing_sources": sorted(str(source) for source in missing_sources),
+    }
 
 
 def snapshot_design(workbook_bytes: bytes, max_rows: int = 40, max_cols: int = 15) -> dict[str, Any]:
@@ -310,6 +398,7 @@ def inject_data(template_bytes: bytes, mapping: dict[str, Any], data: dict[str, 
 
         table = mapping["data_table"]
         cols = table["columns"]
+        source_cols = mapping.get("source_columns", {})
         start_row = int(table["data_start_row"])
         end_row = int(table["data_end_row"])
 
@@ -318,8 +407,10 @@ def inject_data(template_bytes: bytes, mapping: dict[str, Any], data: dict[str, 
             if excel_row > end_row:
                 break
             for field, col_letter in cols.items():
-                if field in row_data:
-                    ws[f"{col_letter}{excel_row}"] = row_data[field]
+                source_column = source_cols.get(field, field)
+                value = lookup_row_value(row_data, source_column)
+                if value is not None:
+                    ws[f"{col_letter}{excel_row}"] = value
 
         if mapping.get("note_cell"):
             ws[mapping["note_cell"]] = data.get("note")
@@ -339,6 +430,8 @@ def validate_mapping(mapping_text: str) -> dict[str, Any]:
         raise ValueError(f"매핑 JSON에 필수 키가 없습니다: {', '.join(missing)}")
     if "columns" not in mapping["data_table"]:
         raise ValueError("data_table.columns가 필요합니다.")
+    if "source_columns" not in mapping:
+        mapping["source_columns"] = {field: field for field in mapping["data_table"]["columns"]}
     return mapping
 
 
