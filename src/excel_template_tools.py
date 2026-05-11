@@ -10,6 +10,7 @@ from typing import Any
 
 import pandas as pd
 from openpyxl import load_workbook
+from openpyxl.cell.cell import MergedCell
 from pydantic import BaseModel
 
 
@@ -427,7 +428,7 @@ def inject_sheet_data(wb: Any, sheet_mapping: dict[str, Any], data: dict[str, An
     ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.active
 
     if sheet_mapping.get("report_date_cell"):
-        ws[sheet_mapping["report_date_cell"]] = data.get("report_date")
+        set_cell_value(ws, sheet_mapping["report_date_cell"], data.get("report_date"))
 
     table = sheet_mapping["data_table"]
     cols = table["columns"]
@@ -443,10 +444,24 @@ def inject_sheet_data(wb: Any, sheet_mapping: dict[str, Any], data: dict[str, An
             source_column = source_cols.get(field, field)
             value = lookup_row_value(row_data, source_column)
             if value is not None:
-                ws[f"{col_letter}{excel_row}"] = value
+                set_cell_value(ws, f"{col_letter}{excel_row}", value)
 
     if sheet_mapping.get("note_cell"):
-        ws[sheet_mapping["note_cell"]] = data.get("note")
+        set_cell_value(ws, sheet_mapping["note_cell"], data.get("note"))
+
+
+def set_cell_value(ws: Any, cell_addr: str, value: Any) -> None:
+    cell = ws[cell_addr]
+    if isinstance(cell, MergedCell):
+        cell = ws[get_merged_parent_address(ws, cell_addr)]
+    cell.value = value
+
+
+def get_merged_parent_address(ws: Any, cell_addr: str) -> str:
+    for merged_range in ws.merged_cells.ranges:
+        if cell_addr in merged_range:
+            return merged_range.start_cell.coordinate
+    return cell_addr
 
 
 def validate_mapping(mapping_text: str) -> dict[str, Any]:
