@@ -18,7 +18,7 @@ from src.excel_template_tools import (
 )
 
 
-APP_VERSION = "2026-05-11-mapping-json-guard-v1"
+APP_VERSION = "2026-05-11-multi-sheet-mapping-v1"
 
 
 def get_secret(name: str) -> str:
@@ -134,8 +134,9 @@ if run and template_bytes and data_df is not None:
         st.subheader("데이터 매핑 확인")
         st.json(
             {
-                "source_columns": mapping.get("source_columns", {}),
+                "mapped_sheets": [sheet.get("sheet_name") for sheet in mapping.get("sheets", [])],
                 "injectable_values": coverage["injectable_values"],
+                "sheet_counts": coverage["sheet_counts"],
                 "missing_sources": coverage["missing_sources"],
             },
             expanded=False,

@@ -13,7 +13,7 @@ from openpyxl import load_workbook
 from pydantic import BaseModel
 
 
-DEFAULT_MAPPING = {
+DEFAULT_SHEET_MAPPING = {
     "sheet_name": "Sheet1",
     "report_date_cell": "C2",
     "data_table": {
@@ -40,6 +40,8 @@ DEFAULT_MAPPING = {
     "note_cell": "A12",
 }
 
+DEFAULT_MAPPING = {"sheets": [DEFAULT_SHEET_MAPPING]}
+
 
 class MappingColumns(BaseModel):
     media: str
@@ -64,6 +66,10 @@ class TemplateMapping(BaseModel):
     formula_columns: list[str]
     total_row: int
     note_cell: str
+
+
+class WorkbookMapping(BaseModel):
+    sheets: list[TemplateMapping]
 
 
 def extract_template_structure(workbook_bytes: bytes, max_rows: int = 30, max_cols: int = 15) -> dict[str, Any]:
@@ -157,35 +163,42 @@ def build_ai_prompt(structure: dict[str, Any], data_preview: dict[str, Any] | No
 {chr(10).join(sheet_blocks)}
 {data_block}
 
-위 템플릿에서 매일 교체되어야 할 동적 데이터의 셀 위치를 추론하여
+위 템플릿에서 매일 교체되어야 할 동적 데이터의 셀 위치를 시트별로 추론하여
 업로드 데이터 컬럼과 템플릿 입력 필드도 함께 매핑해주세요.
+sheets 배열에는 위에 나열된 모든 워크시트를 하나씩 포함하세요.
+즉, 워크북 전체 시트 수가 4개이면 sheets 배열도 반드시 4개 항목이어야 합니다.
+어떤 시트의 위치가 애매해도 가장 그럴듯한 데이터 영역을 추론해서 포함하세요.
 아래 JSON 스키마로 답해주세요. 설명 없이 JSON만 출력하세요.
 
 {{
-  "sheet_name": "데이터를 교체할 시트명",
-  "report_date_cell": "보고일자가 들어갈 셀 주소",
-  "data_table": {{
-    "header_row": 헤더 행 번호,
-    "data_start_row": 데이터 시작 행,
-    "data_end_row": 데이터 끝 행,
-    "columns": {{
-      "media": "매체명 컬럼 letter",
-      "impression": "노출수 컬럼 letter",
-      "click": "클릭수 컬럼 letter",
-      "cost": "비용 컬럼 letter",
-      "conversion": "전환수 컬럼 letter"
+  "sheets": [
+    {{
+      "sheet_name": "데이터를 교체할 시트명",
+      "report_date_cell": "보고일자가 들어갈 셀 주소",
+      "data_table": {{
+        "header_row": 헤더 행 번호,
+        "data_start_row": 데이터 시작 행,
+        "data_end_row": 데이터 끝 행,
+        "columns": {{
+          "media": "매체명 컬럼 letter",
+          "impression": "노출수 컬럼 letter",
+          "click": "클릭수 컬럼 letter",
+          "cost": "비용 컬럼 letter",
+          "conversion": "전환수 컬럼 letter"
+        }}
+      }},
+      "source_columns": {{
+        "media": "업로드 데이터에서 매체명에 해당하는 컬럼명",
+        "impression": "업로드 데이터에서 노출수에 해당하는 컬럼명",
+        "click": "업로드 데이터에서 클릭수에 해당하는 컬럼명",
+        "cost": "업로드 데이터에서 비용에 해당하는 컬럼명",
+        "conversion": "업로드 데이터에서 전환수에 해당하는 컬럼명"
+      }},
+      "formula_columns": ["수식이 들어있어 건드리면 안 되는 컬럼 letter들"],
+      "total_row": 합계 행 번호,
+      "note_cell": "비고/메모 입력 셀 주소"
     }}
-  }},
-  "source_columns": {{
-    "media": "업로드 데이터에서 매체명에 해당하는 컬럼명",
-    "impression": "업로드 데이터에서 노출수에 해당하는 컬럼명",
-    "click": "업로드 데이터에서 클릭수에 해당하는 컬럼명",
-    "cost": "업로드 데이터에서 비용에 해당하는 컬럼명",
-    "conversion": "업로드 데이터에서 전환수에 해당하는 컬럼명"
-  }},
-  "formula_columns": ["수식이 들어있어 건드리면 안 되는 컬럼 letter들"],
-  "total_row": 합계 행 번호,
-  "note_cell": "비고/메모 입력 셀 주소"
+  ]
 }}
 """
 
@@ -210,7 +223,7 @@ def generate_mapping_with_gemini(
     system_instruction = (
         "You infer Excel template mappings. Return only fields that identify where daily data "
         "should be written. Preserve formulas and total rows by excluding them from editable "
-        "data columns. Choose the most likely sheet when a workbook has multiple sheets. "
+        "data columns. Return exactly one mapping item for every worksheet in the workbook. "
         "Map uploaded source data columns to the canonical fields: media, impression, click, "
         "cost, and conversion."
     )
@@ -221,14 +234,14 @@ def generate_mapping_with_gemini(
         config={
             "system_instruction": system_instruction,
             "response_mime_type": "application/json",
-            "response_schema": TemplateMapping,
+            "response_schema": WorkbookMapping,
         },
     )
 
     parsed = response.parsed
-    if isinstance(parsed, TemplateMapping):
+    if isinstance(parsed, WorkbookMapping):
         return parsed.model_dump()
-    return TemplateMapping.model_validate_json(response.text).model_dump()
+    return WorkbookMapping.model_validate_json(response.text).model_dump()
 
 
 def read_data_table(uploaded_file: Any) -> pd.DataFrame:
@@ -280,24 +293,31 @@ def lookup_row_value(row_data: dict[str, Any], source_column: str) -> Any:
 
 
 def count_injectable_values(mapping: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
-    cols = mapping["data_table"]["columns"]
-    source_cols = mapping.get("source_columns", {})
+    sheet_mappings = get_sheet_mappings(mapping)
     rows = data["rows"]
     count = 0
     missing_sources = set()
+    sheet_counts = {}
 
-    for row_data in rows:
-        for field in cols:
-            source_column = source_cols.get(field, field)
-            value = lookup_row_value(row_data, source_column)
-            if value is None:
-                missing_sources.add(source_column)
-            else:
-                count += 1
+    for sheet_mapping in sheet_mappings:
+        sheet_count = 0
+        cols = sheet_mapping["data_table"]["columns"]
+        source_cols = sheet_mapping.get("source_columns", {})
+        for row_data in rows:
+            for field in cols:
+                source_column = source_cols.get(field, field)
+                value = lookup_row_value(row_data, source_column)
+                if value is None:
+                    missing_sources.add(source_column)
+                else:
+                    count += 1
+                    sheet_count += 1
+        sheet_counts[sheet_mapping.get("sheet_name", "(active sheet)")] = sheet_count
 
     return {
         "injectable_values": count,
         "missing_sources": sorted(str(source) for source in missing_sources),
+        "sheet_counts": sheet_counts,
     }
 
 
@@ -391,36 +411,42 @@ def inject_data(template_bytes: bytes, mapping: dict[str, Any], data: dict[str, 
     try:
         shutil.copy(template_path, output_path)
         wb = load_workbook(output_path, data_only=False)
-        sheet_name = mapping.get("sheet_name")
-        ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.active
 
-        if mapping.get("report_date_cell"):
-            ws[mapping["report_date_cell"]] = data.get("report_date")
-
-        table = mapping["data_table"]
-        cols = table["columns"]
-        source_cols = mapping.get("source_columns", {})
-        start_row = int(table["data_start_row"])
-        end_row = int(table["data_end_row"])
-
-        for index, row_data in enumerate(data["rows"]):
-            excel_row = start_row + index
-            if excel_row > end_row:
-                break
-            for field, col_letter in cols.items():
-                source_column = source_cols.get(field, field)
-                value = lookup_row_value(row_data, source_column)
-                if value is not None:
-                    ws[f"{col_letter}{excel_row}"] = value
-
-        if mapping.get("note_cell"):
-            ws[mapping["note_cell"]] = data.get("note")
+        for sheet_mapping in get_sheet_mappings(mapping):
+            inject_sheet_data(wb, sheet_mapping, data)
 
         wb.save(output_path)
         return output_path.read_bytes()
     finally:
         template_path.unlink(missing_ok=True)
         output_path.unlink(missing_ok=True)
+
+
+def inject_sheet_data(wb: Any, sheet_mapping: dict[str, Any], data: dict[str, Any]) -> None:
+    sheet_name = sheet_mapping.get("sheet_name")
+    ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.active
+
+    if sheet_mapping.get("report_date_cell"):
+        ws[sheet_mapping["report_date_cell"]] = data.get("report_date")
+
+    table = sheet_mapping["data_table"]
+    cols = table["columns"]
+    source_cols = sheet_mapping.get("source_columns", {})
+    start_row = int(table["data_start_row"])
+    end_row = int(table["data_end_row"])
+
+    for index, row_data in enumerate(data["rows"]):
+        excel_row = start_row + index
+        if excel_row > end_row:
+            break
+        for field, col_letter in cols.items():
+            source_column = source_cols.get(field, field)
+            value = lookup_row_value(row_data, source_column)
+            if value is not None:
+                ws[f"{col_letter}{excel_row}"] = value
+
+    if sheet_mapping.get("note_cell"):
+        ws[sheet_mapping["note_cell"]] = data.get("note")
 
 
 def validate_mapping(mapping_text: str) -> dict[str, Any]:
@@ -433,15 +459,31 @@ def validate_mapping(mapping_text: str) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise ValueError(f"매핑 JSON 형식이 올바르지 않습니다: {exc.msg}") from exc
 
-    required = ["report_date_cell", "data_table", "note_cell"]
-    missing = [key for key in required if key not in mapping]
-    if missing:
-        raise ValueError(f"매핑 JSON에 필수 키가 없습니다: {', '.join(missing)}")
-    if "columns" not in mapping["data_table"]:
-        raise ValueError("data_table.columns가 필요합니다.")
-    if "source_columns" not in mapping:
-        mapping["source_columns"] = {field: field for field in mapping["data_table"]["columns"]}
+    sheet_mappings = get_sheet_mappings(mapping)
+    if not sheet_mappings:
+        raise ValueError("매핑 JSON의 sheets 배열이 비어 있습니다.")
+
+    for index, sheet_mapping in enumerate(sheet_mappings, start=1):
+        required = ["sheet_name", "report_date_cell", "data_table", "note_cell"]
+        missing = [key for key in required if key not in sheet_mapping]
+        if missing:
+            raise ValueError(f"{index}번째 시트 매핑에 필수 키가 없습니다: {', '.join(missing)}")
+        if "columns" not in sheet_mapping["data_table"]:
+            raise ValueError(f"{index}번째 시트 매핑에 data_table.columns가 필요합니다.")
+        if "source_columns" not in sheet_mapping:
+            sheet_mapping["source_columns"] = {
+                field: field for field in sheet_mapping["data_table"]["columns"]
+            }
+
+    if "sheets" not in mapping:
+        mapping = {"sheets": sheet_mappings}
     return mapping
+
+
+def get_sheet_mappings(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+    if "sheets" in mapping:
+        return mapping.get("sheets") or []
+    return [mapping]
 
 
 def clean_mapping_text(mapping_text: str | None) -> str:
