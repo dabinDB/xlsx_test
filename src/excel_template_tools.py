@@ -12,6 +12,7 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.formula.translate import Translator
+from openpyxl.utils import get_column_letter
 from pydantic import BaseModel
 
 
@@ -85,15 +86,15 @@ def extract_template_structure(
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
+        scan_max_row = max_rows or ws.max_row
+        scan_max_col = max_cols or ws.max_column
         sheet_info: dict[str, Any] = {
             "name": sheet_name,
             "dimensions": ws.dimensions,
+            "scan_range": f"A1:{get_column_letter(scan_max_col)}{scan_max_row}",
             "merged_ranges": [str(r) for r in ws.merged_cells.ranges],
             "cells": [],
         }
-
-        scan_max_row = max_rows or ws.max_row
-        scan_max_col = max_cols or ws.max_column
 
         for row in ws.iter_rows(min_row=1, max_row=scan_max_row, min_col=1, max_col=scan_max_col):
             for cell in row:
@@ -143,7 +144,8 @@ def build_ai_prompt(structure: dict[str, Any], data_preview: dict[str, Any] | No
         sheet_blocks.append(
             f"""[시트 {index}]
 시트명: {sheet['name']}
-데이터 영역: {sheet['dimensions']}
+원본 사용 영역: {sheet['dimensions']}
+실제 스캔 범위: {sheet.get('scan_range', sheet['dimensions'])}
 
 병합된 셀:
 {merged}

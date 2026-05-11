@@ -18,7 +18,7 @@ from src.excel_template_tools import (
 )
 
 
-APP_VERSION = "2026-05-11-full-row-injection-v1"
+APP_VERSION = "2026-05-11-configurable-scan-range-v1"
 
 
 def get_secret(name: str) -> str:
@@ -55,6 +55,10 @@ with st.sidebar:
     if secret_api_key:
         st.success("GEMINI_API_KEY가 Secrets에서 로드되었습니다.")
 
+    st.header("템플릿 분석 범위")
+    analysis_max_rows = st.number_input("분석할 최대 행", min_value=30, max_value=5000, value=500, step=50)
+    analysis_max_cols = st.number_input("분석할 최대 열", min_value=10, max_value=200, value=50, step=5)
+
 st.divider()
 
 if "mapping_text" not in st.session_state:
@@ -71,10 +75,15 @@ with left:
     st.subheader("템플릿 구조 / AI 프롬프트")
     if template_file:
         template_bytes = template_file.getvalue()
-        structure = extract_template_structure(template_bytes)
+        structure = extract_template_structure(
+            template_bytes,
+            max_rows=int(analysis_max_rows),
+            max_cols=int(analysis_max_cols),
+        )
         sheet_names = [sheet["name"] for sheet in structure["sheets"]]
         st.success(f"분석된 시트 수: {len(sheet_names)}개")
         st.write("시트 목록:", ", ".join(sheet_names))
+        st.write("스캔 범위:", ", ".join(f"{sheet['name']}={sheet['scan_range']}" for sheet in structure["sheets"]))
         st.json(structure, expanded=False)
         data_preview = build_data_preview(data_df) if data_df is not None else None
         with st.expander("AI 매핑 프롬프트 보기"):
