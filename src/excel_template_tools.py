@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
+from openpyxl.formula.translate import Translator
 from pydantic import BaseModel
 
 
@@ -73,7 +74,11 @@ class WorkbookMapping(BaseModel):
     sheets: list[TemplateMapping]
 
 
-def extract_template_structure(workbook_bytes: bytes, max_rows: int = 30, max_cols: int = 15) -> dict[str, Any]:
+def extract_template_structure(
+    workbook_bytes: bytes,
+    max_rows: int | None = None,
+    max_cols: int | None = None,
+) -> dict[str, Any]:
     """Extract visible template structure for AI-assisted mapping."""
     wb = load_workbook(BytesIO(workbook_bytes), data_only=False)
     result: dict[str, Any] = {"sheets": []}
@@ -87,7 +92,10 @@ def extract_template_structure(workbook_bytes: bytes, max_rows: int = 30, max_co
             "cells": [],
         }
 
-        for row in ws.iter_rows(min_row=1, max_row=max_rows, min_col=1, max_col=max_cols):
+        scan_max_row = max_rows or ws.max_row
+        scan_max_col = max_cols or ws.max_column
+
+        for row in ws.iter_rows(min_row=1, max_row=scan_max_row, min_col=1, max_col=scan_max_col):
             for cell in row:
                 if cell.value is None:
                     continue
@@ -439,7 +447,7 @@ def inject_sheet_data(wb: Any, sheet_mapping: dict[str, Any], data: dict[str, An
     for index, row_data in enumerate(data["rows"]):
         excel_row = start_row + index
         if excel_row > end_row:
-            break
+            copy_row_template(ws, end_row, excel_row)
         for field, col_letter in cols.items():
             source_column = source_cols.get(field, field)
             value = lookup_row_value(row_data, source_column)
@@ -455,6 +463,39 @@ def set_cell_value(ws: Any, cell_addr: str, value: Any) -> None:
     if isinstance(cell, MergedCell):
         cell = ws[get_merged_parent_address(ws, cell_addr)]
     cell.value = value
+
+
+def copy_row_template(ws: Any, source_row: int, target_row: int) -> None:
+    if target_row <= source_row:
+        return
+
+    source_dimension = ws.row_dimensions[source_row]
+    target_dimension = ws.row_dimensions[target_row]
+    target_dimension.height = source_dimension.height
+    target_dimension.hidden = source_dimension.hidden
+
+    for col_index in range(1, ws.max_column + 1):
+        source_cell = ws.cell(row=source_row, column=col_index)
+        target_cell = ws.cell(row=target_row, column=col_index)
+
+        if source_cell.has_style:
+            target_cell._style = copy.copy(source_cell._style)
+        if source_cell.number_format:
+            target_cell.number_format = source_cell.number_format
+        if source_cell.alignment:
+            target_cell.alignment = copy.copy(source_cell.alignment)
+        if source_cell.protection:
+            target_cell.protection = copy.copy(source_cell.protection)
+
+        if isinstance(source_cell.value, str) and source_cell.value.startswith("="):
+            target_cell.value = translate_formula(source_cell.value, source_cell.coordinate, target_cell.coordinate)
+
+
+def translate_formula(formula: str, origin: str, target: str) -> str:
+    try:
+        return Translator(formula, origin=origin).translate_formula(target)
+    except Exception:
+        return formula
 
 
 def get_merged_parent_address(ws: Any, cell_addr: str) -> str:

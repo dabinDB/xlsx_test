@@ -18,7 +18,7 @@ from src.excel_template_tools import (
 )
 
 
-APP_VERSION = "2026-05-11-merged-cell-fix-v1"
+APP_VERSION = "2026-05-11-full-row-injection-v1"
 
 
 def get_secret(name: str) -> str:
