@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 import shutil
 from datetime import date, datetime
 from io import BytesIO
@@ -423,7 +424,15 @@ def inject_data(template_bytes: bytes, mapping: dict[str, Any], data: dict[str, 
 
 
 def validate_mapping(mapping_text: str) -> dict[str, Any]:
-    mapping = json.loads(mapping_text)
+    cleaned_text = clean_mapping_text(mapping_text)
+    if not cleaned_text:
+        raise ValueError("매핑 JSON이 비어 있습니다. Gemini API로 매핑을 생성하거나 JSON을 직접 입력하세요.")
+
+    try:
+        mapping = json.loads(cleaned_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"매핑 JSON 형식이 올바르지 않습니다: {exc.msg}") from exc
+
     required = ["report_date_cell", "data_table", "note_cell"]
     missing = [key for key in required if key not in mapping]
     if missing:
@@ -433,6 +442,23 @@ def validate_mapping(mapping_text: str) -> dict[str, Any]:
     if "source_columns" not in mapping:
         mapping["source_columns"] = {field: field for field in mapping["data_table"]["columns"]}
     return mapping
+
+
+def clean_mapping_text(mapping_text: str | None) -> str:
+    text = (mapping_text or "").strip()
+    if not text:
+        return ""
+
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    if fenced:
+        text = fenced.group(1).strip()
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        text = text[start : end + 1]
+
+    return text.strip()
 
 
 def mapping_as_text(mapping: dict[str, Any] | None = None) -> str:

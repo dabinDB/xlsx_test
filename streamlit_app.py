@@ -18,7 +18,7 @@ from src.excel_template_tools import (
 )
 
 
-APP_VERSION = "2026-05-11-data-aware-mapping-v1"
+APP_VERSION = "2026-05-11-mapping-json-guard-v1"
 
 
 def get_secret(name: str) -> str:
@@ -174,4 +174,5 @@ if run and template_bytes and data_df is not None:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     except Exception as exc:
-        st.exception(exc)
+        st.error(str(exc))
+        st.info("매핑 JSON 입력창이 비어 있으면 먼저 `Gemini API로 템플릿+데이터 매핑 생성`을 누르거나 JSON을 직접 붙여넣어 주세요.")
